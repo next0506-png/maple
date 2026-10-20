@@ -25,18 +25,17 @@ const USE_SUPABASE = !!(SUPABASE_URL && SUPABASE_KEY && !SUPABASE_URL.includes('
 if (USE_SUPABASE) console.log('Supabase 저장소 사용: ' + SUPABASE_URL);
 else console.log('SUPABASE_URL/SUPABASE_KEY가 비어있어요 - 로컬 JSON 파일로 저장해요 (재배포 시 사라질 수 있어요).');
 
-function sbFetch(method, pathAndQuery, body, extraHeaders) {
+function sbOnce(method, pathAndQuery, body, extraHeaders, withBearer) {
   return new Promise((resolve, reject) => {
     let u;
     try { u = new URL(SUPABASE_URL + '/rest/v1/' + pathAndQuery); } catch (e) { return reject(e); }
     const data = body !== undefined ? Buffer.from(JSON.stringify(body)) : null;
     const headers = Object.assign({
       apikey: SUPABASE_KEY,
-      Authorization: 'Bearer ' + SUPABASE_KEY,
       'Content-Type': 'application/json'
-    }, extraHeaders || {});
+    }, withBearer ? { Authorization: 'Bearer ' + SUPABASE_KEY } : {}, extraHeaders || {});
     if (data) headers['Content-Length'] = data.length;
-    const req = https.request({ hostname: u.hostname, path: u.pathname + u.search, method, headers }, r => {
+    const req = https.request({ hostname: u.hostname, path: u.pathname + u.search, method, headers, timeout: 12000 }, r => {
       const chunks = [];
       r.on('data', c => chunks.push(c));
       r.on('end', () => {
@@ -46,10 +45,32 @@ function sbFetch(method, pathAndQuery, body, extraHeaders) {
         resolve({ status: r.statusCode, json, text });
       });
     });
+    req.on('timeout', () => { req.destroy(new Error('supabase 응답 시간 초과')); });
     req.on('error', reject);
     if (data) req.write(data);
     req.end();
   });
+}
+/* 키 형식(신규 sb_secret_... / 구 service_role JWT)에 따라 Bearer 헤더를 싫어하는 경우가 있어서
+   401/403이면 Authorization 없이 apikey만으로 한 번 더 시도해요. */
+async function sbFetch(method, pathAndQuery, body, extraHeaders) {
+  const r = await sbOnce(method, pathAndQuery, body, extraHeaders, true);
+  if (r.status === 401 || r.status === 403) {
+    const r2 = await sbOnce(method, pathAndQuery, body, extraHeaders, false);
+    if (r2.status >= 200 && r2.status < 300) return r2;
+    return r2.status === 401 || r2.status === 403 ? r : r2;
+  }
+  return r;
+}
+/* 부팅 직후 Supabase에 실제로 한 번 연결해 보고 결과를 기록해요 (/api/ping 에서 확인 가능) */
+let SB_STATUS = USE_SUPABASE ? '확인 중…' : '사용 안 함 (로컬 파일)';
+if (USE_SUPABASE) {
+  sbFetch('GET', 'users?select=name&limit=1')
+    .then(r => {
+      if (r.status >= 200 && r.status < 300) { SB_STATUS = 'OK'; console.log('[Supabase] 연결 성공 - 저장이 영구 보관돼요'); }
+      else { SB_STATUS = 'HTTP ' + r.status + ' ' + String(r.text || '').slice(0, 300); console.error('[Supabase] 연결 실패:', SB_STATUS); }
+    })
+    .catch(e => { SB_STATUS = '연결 오류: ' + (e && e.message ? e.message : String(e)); console.error('[Supabase] 연결 실패:', SB_STATUS); });
 }
 
 /* ---------- 사용자 저장소 (Supabase 있으면 그쪽에, 없으면 JSON 파일에 변경 시 디바운스 기록) ---------- */
