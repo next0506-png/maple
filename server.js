@@ -20,7 +20,7 @@ const PUBLIC = fs.existsSync(path.join(__dirname, 'public', 'index.html')) ? pat
    2) SUPABASE_KEY  : Supabase 프로젝트의 Settings → API → "service_role" 비밀 키 (anon 키 아님!)
    값을 채우면 자동으로 Supabase DB에 저장하고, 빈 문자열로 두면 로컬 data/db.json 파일을 써요. */
 const SUPABASE_URL = 'https://zfhnwdvwnfktkgdogcze.supabase.co'.replace(/\/$/, '');
-const SUPABASE_KEY = 'sb_secret_LquOeJxgJHMFU8aVoaEoRw_7JfVzqIb';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpmaG53ZHZ3bmZrdGtnZG9nY3plIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MjIzNDc2OSwiZXhwIjoyMTA3ODEwNzY5fQ.sT_PSK1oCIPxZCfj-qTn4MTixwY7BQxQEnlPf2MshJI';
 const USE_SUPABASE = !!(SUPABASE_URL && SUPABASE_KEY && !SUPABASE_URL.includes('여기에') && !SUPABASE_KEY.includes('여기에'));
 if (USE_SUPABASE) console.log('Supabase 저장소 사용: ' + SUPABASE_URL);
 else console.log('SUPABASE_URL/SUPABASE_KEY가 비어있어요 - 로컬 JSON 파일로 저장해요 (재배포 시 사라질 수 있어요).');
