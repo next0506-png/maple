@@ -91,7 +91,7 @@ setInterval(flush, 3000);
 process.on('SIGTERM', () => { flush(); process.exit(0); });
 process.on('SIGINT', () => { flush(); process.exit(0); });
 
-function hashPw(pw, salt) { return crypto.scryptSync(pw, salt, 32).toString('hex'); }
+function hashPw(pw, salt) { return crypto.scryptSync(String(pw == null ? '' : pw), String(salt == null ? '' : salt), 32).toString('hex'); }
 function newToken(name) {
   const t = crypto.randomBytes(24).toString('hex');
   db.tokens[t] = { name, t: Date.now() };
@@ -105,8 +105,8 @@ function userOf(token) {
 async function getUser(name) {
   if (USE_SUPABASE) {
     const r = await sbFetch('GET', 'users?name=eq.' + encodeURIComponent(name) + '&select=name,salt,hash,save');
-    if (r.status >= 200 && r.status < 300 && Array.isArray(r.json) && r.json.length) return r.json[0];
-    return null;
+    if (r.status >= 200 && r.status < 300) return (Array.isArray(r.json) && r.json.length) ? r.json[0] : null;
+    throw new Error('supabase 조회 실패 ' + r.status + ' ' + String(r.text || '').slice(0, 200));
   }
   return db.users[name] || null;
 }
@@ -164,7 +164,7 @@ const server = http.createServer(async (req, res) => {
   const ip = req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',')[0].trim() : req.socket.remoteAddress;
   const url = new URL(req.url, 'http://x');
   try {
-    if (url.pathname === '/api/ping') return send(res, 200, { ok: true, v: 1, online: wss.clients.size });
+    if (url.pathname === '/api/ping') return send(res, 200, { ok: true, v: 1, online: wss.clients.size, store: USE_SUPABASE ? 'supabase' : 'file', sb: SB_STATUS });
     if (url.pathname === '/api/register' && req.method === 'POST') {
       if (limited(ip, 15, 600000)) return send(res, 429, { err: '잠시 후 다시 시도해 주세요.' });
       const b = await readBody(req);
@@ -180,8 +180,9 @@ const server = http.createServer(async (req, res) => {
       const b = await readBody(req);
       const u = typeof b.name === 'string' ? await getUser(b.name) : null;
       if (!u) return send(res, 404, { err: '없는 아이디예요. "새로 시작"으로 만들 수 있어요.' });
+      if (typeof u.salt !== 'string' || typeof u.hash !== 'string') return send(res, 500, { err: '계정 데이터가 손상됐어요. 다른 아이디로 "새로 시작"해 주세요.' });
       const h = hashPw(String(b.pw || ''), u.salt);
-      if (!crypto.timingSafeEqual(Buffer.from(h), Buffer.from(u.hash))) return send(res, 401, { err: '비밀번호가 맞지 않아요.' });
+      if (h.length !== u.hash.length || !crypto.timingSafeEqual(Buffer.from(h), Buffer.from(u.hash))) return send(res, 401, { err: '비밀번호가 맞지 않아요.' });
       return send(res, 200, { token: newToken(b.name), name: b.name, save: u.save });
     }
     if (url.pathname === '/api/me' && req.method === 'GET') {
@@ -217,8 +218,9 @@ const server = http.createServer(async (req, res) => {
       res.end(data);
     });
   } catch (e) {
-    console.error('request error', e.message);
-    send(res, 400, { err: '요청이 올바르지 않아요.' });
+    const msg = e && e.message ? String(e.message) : String(e);
+    console.error('request error', msg);
+    send(res, 400, { err: '요청 처리 실패: ' + msg.slice(0, 300) });
   }
 });
 
